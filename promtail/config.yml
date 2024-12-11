@@ -1,0 +1,39 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Scraping logs from Node.js application
+  - job_name: "node-logs"
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: "node-app"
+          __path__: /var/log/node-app/*.log
+
+  # Scraping logs from MinIO
+  - job_name: "minio-logs"
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: "minio"
+          __path__: /var/log/minio/*.log
+
+  # Scraping Docker container logs
+  - job_name: "docker-logs"
+    pipeline_stages:
+      - docker: {}
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: "docker-logs"
+          __path__: /var/log/docker/containers/*/*.log

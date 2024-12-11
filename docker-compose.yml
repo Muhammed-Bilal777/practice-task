@@ -1,0 +1,140 @@
+version: "3.8"
+
+services:
+  node-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: node-app
+    ports:
+      - "4040:4040"
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongo:27017/taskdb
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - mongo
+      - minio
+      - redis
+    env_file:
+      - config/config.env
+    volumes:
+      - ./logs:/var/log/node-app
+    networks:
+      - app-network
+    restart: always
+    healthcheck:
+      test:
+        ["CMD", "curl", "--silent", "--fail", "http://localhost:4040/health"]
+      interval: 30s
+      retries: 3
+      timeout: 10s
+      start_period: 10s
+
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=rootpassword
+      - MONGO_INITDB_DATABASE=taskdb
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - app-network
+    restart: always
+
+  promtail:
+    image: grafana/promtail:2.5.0
+    container_name: promtail
+    volumes:
+      - ./logs:/var/log
+      - ./promtail/config.yml:/etc/promtail/config.yml
+    networks:
+      - app-network
+    restart: always
+
+  loki:
+    image: grafana/loki:2.5.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    networks:
+      - app-network
+    restart: always
+
+  grafana:
+    image: grafana/grafana:8.3.2
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+    restart: always
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    environment:
+      MINIO_PROMETHEUS_AUTH_TYPE: "public"
+      MINIO_ROOT_USER: "test"
+      MINIO_ROOT_PASSWORD: "test1234"
+      MINIO_LOG_DIR: "/var/log/"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+      - ./minioLogs:/var/logs
+    networks:
+      - app-network
+    restart: always
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--silent",
+          "--fail",
+          "http://localhost:9000/minio/health/live",
+        ]
+      interval: 30s
+      retries: 3
+      timeout: 10s
+      start_period: 10s
+    command: server --address ":9000" --console-address ":9001" --json /data
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - app-network
+    restart: always
+    depends_on:
+      - minio
+      - node-app
+  redis: # Add Redis service
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379" # Expose Redis port
+    networks:
+      - app-network
+    restart: always
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mongo-data:
+    driver: local
+  minio-data:
+    driver: local
