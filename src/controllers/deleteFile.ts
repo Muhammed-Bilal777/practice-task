@@ -1,10 +1,12 @@
 import { Request, Response } from "express";
+import redisClient, {
+  generateCacheKey,
+  invalidateAllCaches,
+} from "../utils/redisClient";
 
 import FileMetadata from "../model/fileMetaData";
-import { deleteCache } from "../utils/redisClient";
 import logger from "../logger/logger";
 import minioClient from "../minio/minioClient";
-import mongoose from "mongoose";
 
 const fileDeleter = async (req: Request, res: Response): Promise<any> => {
   const { fileName } = req.query;
@@ -16,11 +18,14 @@ const fileDeleter = async (req: Request, res: Response): Promise<any> => {
     });
     return;
   }
+
   let session = await FileMetadata.startSession();
   session.startTransaction();
 
   try {
-    const fileMetadata = await FileMetadata.findOne({ fileName });
+    const fileMetadata = await FileMetadata.findOne({ fileName }).session(
+      session
+    );
 
     if (!fileMetadata) {
       logger.error("File not found in the database.");
@@ -43,15 +48,24 @@ const fileDeleter = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
+    // Remove the file from MinIO
     await minioClient.removeObject(
       bucketName,
       `${fileMetadata.fileName}.${fileMetadata.fileExtension}`
     );
+
     await fileMetadata.deleteOne({ session });
 
+    const cacheKey = generateCacheKey({ fileName: fileMetadata.fileName });
+    console.log(cacheKey, "deleted controller");
+    await redisClient.del(cacheKey);
+    await invalidateAllCaches();
+
     await session.commitTransaction();
-    deleteCache(fileName as string);
-    logger.info("File deleted successfully from both MinIO and database.");
+
+    logger.info(
+      "File deleted successfully from both MinIO and database, cache invalidated."
+    );
     res.status(200).send({
       message: "File deleted successfully from both MinIO and database.",
     });
