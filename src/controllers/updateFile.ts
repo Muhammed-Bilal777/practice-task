@@ -4,7 +4,7 @@ import FileMetadata from "../model/fileMetaData";
 import logger from "../logger/logger";
 import minioClient from "../minio/minioClient";
 import mongoose from "mongoose";
-import { storeCache } from "../utils/redisClient";
+import redisClient from "../utils/redisClient";
 
 const fileUpdater = async (req: Request, res: Response): Promise<any> => {
   if (!req.file) {
@@ -15,17 +15,20 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
   const { originalname, buffer, size } = req.file;
   const [filename, ...extensionParts] = originalname.split(".");
   const extension = extensionParts.join(".");
-  const fileSize = size / 1024;
+  const fileSize = size / 1024; // KB
   const bucketName = process.env.MINIO_BUCKET_NAME as string;
 
   const session = await FileMetadata.startSession();
   session.startTransaction();
 
   try {
-    const fileMetadata = await FileMetadata.findOne({ fileName: filename });
+    const fileMetadata = await FileMetadata.findOne({
+      fileName: filename,
+    }).session(session);
+
     if (!fileMetadata) {
       await session.abortTransaction();
-      session.endSession(); //
+      session.endSession();
       logger.error("File metadata not found");
       return res.status(404).send({ message: "File metadata not found" });
     }
@@ -37,7 +40,7 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
       );
     } catch (err) {
       await session.abortTransaction();
-      session.endSession(); //
+      session.endSession();
       logger.error("File not found in MinIO");
       return res.status(404).send({ message: "File not found in MinIO" });
     }
@@ -45,7 +48,7 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
     const obj = await minioClient.putObject(bucketName, originalname, buffer);
     if (!obj || !obj.etag) {
       await session.abortTransaction();
-      session.endSession(); //
+      session.endSession();
       logger.error("Failed to upload the file to MinIO");
       return res
         .status(500)
@@ -56,17 +59,22 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
     fileMetadata.fileExtension = extension;
     fileMetadata.fileSize = fileSize;
     await fileMetadata.save({ session });
+
     await session.commitTransaction();
-    storeCache(filename, JSON.stringify(fileMetadata));
-    session.endSession(); //
+
+    const cacheKey = `files:cache:fileName:${fileMetadata.fileName}`;
+    await redisClient.del(cacheKey); // Invalidate the cache
+
+    session.endSession();
     logger.info("File updated successfully");
+
     return res.status(200).send({
       message: "File updated successfully",
       data: fileMetadata,
     });
   } catch (error) {
     await session.abortTransaction();
-    session.endSession(); //
+    session.endSession();
     logger.error("Failed to update the file");
     return res.status(500).send({
       message: "Failed to update the file",
