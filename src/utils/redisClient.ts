@@ -6,7 +6,7 @@ const redisClient = new Redis({
   db: 0,
 });
 
-export const generateCacheKey = (
+export const generateUniqueCacheKey = (
   queryParams: Record<string, string | undefined>
 ) => {
   const keys = Object.keys(queryParams)
@@ -38,6 +38,44 @@ export const getCachedData = async (key: string): Promise<any | null> => {
   }
 };
 
+export const resetCache = async (key?: string, data?: any): Promise<void> => {
+  try {
+    if (key && data) {
+      const cachedData = await redisClient.get("files:cache:");
+      if (cachedData) {
+        const parsedData = JSON.parse(cachedData);
+
+        const filteredCache = parsedData.filter(
+          (item: any) => item.fileName !== key
+        );
+
+        filteredCache.push(data);
+
+        await redisClient.set(
+          "files:cache:",
+          JSON.stringify(filteredCache),
+          "EX",
+          3600
+        );
+        console.log("Cache updated after file upload");
+      } else {
+        await redisClient.set(
+          "files:cache:",
+          JSON.stringify([data]),
+          "EX",
+          3600
+        );
+        console.log("Cache set with new data for all files");
+      }
+    } else {
+      await redisClient.del("files:cache:");
+      console.log("Cache invalidated for all files");
+    }
+  } catch (err) {
+    console.error("Error resetting cache:", err);
+  }
+};
+
 export const invalidateCache = async (key: string): Promise<void> => {
   try {
     await redisClient.del(key);
@@ -46,52 +84,3 @@ export const invalidateCache = async (key: string): Promise<void> => {
     console.error(`Error invalidating cache for key: ${key}`, err);
   }
 };
-
-export const invalidateAllCaches = async (): Promise<void> => {
-  try {
-    const keys = await redisClient.keys("files:cache:*");
-    if (keys.length > 0) {
-      await redisClient.del(...keys);
-      console.log("All file-related caches invalidated.");
-    }
-  } catch (err) {
-    console.error("Error invalidating all caches", err);
-  }
-};
-
-export const storeFileMetadataInRedis = async (
-  fileId: string,
-  metadata: any
-): Promise<void> => {
-  try {
-    await redisClient.set(
-      `file:${fileId}`,
-      JSON.stringify(metadata),
-      "EX",
-      3600
-    );
-    console.log(`File metadata cached for fileId: ${fileId}`);
-  } catch (err) {
-    console.error(`Error storing file metadata for fileId: ${fileId}`, err);
-  }
-};
-
-export const getFileMetadataFromRedis = async (
-  fileId: string
-): Promise<any | null> => {
-  try {
-    const metadata = await redisClient.get(`file:${fileId}`);
-    if (metadata) {
-      return JSON.parse(metadata);
-    }
-    return null;
-  } catch (err) {
-    console.error(
-      `Error fetching file metadata for fileId: ${fileId} from Redis`,
-      err
-    );
-    return null;
-  }
-};
-
-export default redisClient;

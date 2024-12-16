@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import {
   cacheData,
-  generateCacheKey,
+  generateUniqueCacheKey,
   getCachedData,
 } from "../utils/redisClient";
 
@@ -31,7 +31,44 @@ const findFiles = async (req: Request, res: Response): Promise<void> => {
   }
 
   const queryStr: any = req.query;
-  const cacheKey = generateCacheKey(queryStr);
+  const cacheKey = generateUniqueCacheKey(queryStr);
+
+  if (Object.keys(req.query).length === 0) {
+    const cachedData = await getCachedData("files:cache:");
+
+    if (cachedData) {
+      res.status(200).json({
+        itemsFound: cachedData.length,
+        items: cachedData,
+      });
+      return;
+    }
+
+    try {
+      const results = await FileMetadata.find();
+
+      if (results.length === 0) {
+        res.status(404).json({
+          message: "No files found in the database",
+        });
+        return;
+      }
+      const uniqueCashKey = "files:cache:";
+      await cacheData(uniqueCashKey, results);
+
+      res.status(200).json({
+        itemsFound: results.length,
+        items: results,
+      });
+      return;
+    } catch (error) {
+      console.error("Error retrieving all files:", error);
+      res.status(500).json({
+        message: "Error retrieving all files",
+      });
+      return;
+    }
+  }
 
   const cachedData = await getCachedData(cacheKey);
   if (cachedData) {

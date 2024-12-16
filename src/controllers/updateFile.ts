@@ -1,10 +1,14 @@
 import { Request, Response } from "express";
+import {
+  cacheData,
+  generateUniqueCacheKey,
+  getCachedData,
+} from "../utils/redisClient";
 
 import FileMetadata from "../model/fileMetaData";
 import logger from "../logger/logger";
 import minioClient from "../minio/minioClient";
 import mongoose from "mongoose";
-import redisClient from "../utils/redisClient";
 
 const fileUpdater = async (req: Request, res: Response): Promise<any> => {
   if (!req.file) {
@@ -55,15 +59,33 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
         .send({ message: "Failed to upload the file to MinIO" });
     }
 
-    fileMetadata.fileName = filename;
     fileMetadata.fileExtension = extension;
     fileMetadata.fileSize = fileSize;
     await fileMetadata.save({ session });
 
-    await session.commitTransaction();
+    const uniqueCashKey = generateUniqueCacheKey({
+      fileName: fileMetadata.fileName,
+    });
+    const cachedData = await getCachedData(uniqueCashKey);
 
-    const cacheKey = `files:cache:fileName:${fileMetadata.fileName}`;
-    await redisClient.del(cacheKey); // Invalidate the cache
+    if (cachedData) {
+      const parsedData = JSON.parse(cachedData);
+
+      const updatedCache = parsedData.map((item: any) => {
+        if (item.fileName === fileMetadata.fileName) {
+          item.fileExtension = fileMetadata.fileExtension;
+          item.fileSize = fileMetadata.fileSize;
+        }
+        return item;
+      });
+
+      await cacheData(uniqueCashKey, updatedCache);
+      console.log(`Cache updated for file: ${fileMetadata.fileName}`);
+    } else {
+      console.log("No cache found for the file. Skipping cache update.");
+    }
+
+    await session.commitTransaction();
 
     session.endSession();
     logger.info("File updated successfully");
