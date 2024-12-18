@@ -13,13 +13,25 @@ dotenv.config({
   path: "./config/config.env",
 });
 
+process.on("uncaughtException", (err) => {
+  logger.error("Uncaught Exception:", err);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error("Unhandled Rejection:", reason);
+  process.exit(1);
+});
+
 const port = process.env.EXPRESS_SERVER_PORT;
 
 //health monitoring
 setupMetrics(app);
 
+//database connection
 connectDB();
 
+//Routes
 app.use("/api/v1", fileRoutes(router));
 
 app.listen(port, () => {
