@@ -1,59 +1,72 @@
 import { Request, Response } from "express";
 
-import FileMetadata from "../model/fileMetaData";
-import logger from "../logger/logger";
+import { IMongoDBClient } from "../utils/interfaces/IMongoDBClient";
+import { IRedisClient } from "../utils/interfaces/IRedisClient";
+import { MongoDBClient } from "../utils/mongooseUtils";
+import { RedisClient } from "../utils/redisClient";
+import { buildSearchCriteria } from "../utils/seachCreteria";
+
+const mongoDBClient: IMongoDBClient = new MongoDBClient();
+const redisClient: IRedisClient = new RedisClient();
 
 const findFiles = async (req: Request, res: Response): Promise<void> => {
-  const { fileName, fileExtension, dimension, fileSize, minSize, maxSize } =
-    req.query;
+  const queryStr: any = req.query;
+  const cacheKey = redisClient.generateUniqueCacheKey(queryStr);
 
-  const searchCriteria: { $and: Array<{ [key: string]: any }> } = {
-    $and: [],
-  };
-
-  if (fileName) {
-    searchCriteria.$and.push({ fileName });
-  }
-  if (fileExtension) {
-    searchCriteria.$and.push({ fileExtension });
-  }
-  if (fileSize) {
-    searchCriteria.$and.push({ fileSize: Number(fileSize) });
-  }
-  if (minSize) {
-    searchCriteria.$and.push({ fileSize: { $lte: Number(minSize) } });
-  }
-  if (maxSize) {
-    searchCriteria.$and.push({ fileSize: { $gte: Number(maxSize) } });
-  }
-
-  if (searchCriteria.$and.length === 0) {
-    const result = await FileMetadata.find();
-
+  const cachedData = await redisClient.getCachedData(cacheKey);
+  if (cachedData) {
     res.status(200).json({
-      result,
+      itemsFound: cachedData.length,
+      items: cachedData,
     });
     return;
   }
 
-  try {
-    const results = await FileMetadata.find(searchCriteria);
-
-    if (results.length <= 0) {
-      logger.info("items not found");
-      res.status(404).json({
-        message: "items not found",
+  if (Object.keys(req.query).length === 0) {
+    const allFilesCache = await redisClient.getCachedData("files:cache:");
+    if (allFilesCache) {
+      res.status(200).json({
+        itemsFound: allFilesCache.length,
+        items: allFilesCache,
       });
       return;
     }
-    logger.info("successsfully fetched data");
-    res.status(200).json({
-      itemsFound: results.length,
-      items: results,
-    });
+
+    const results = await mongoDBClient.findAllFilesInDB();
+    if (results) {
+      await redisClient.cacheData(cacheKey, results);
+      res.status(200).json({
+        itemsFound: results.length,
+        items: results,
+      });
+      return;
+    }
+  }
+
+  try {
+    const searchCriteria = buildSearchCriteria(queryStr);
+
+    const results = await mongoDBClient.findFilesInDB(searchCriteria);
+
+    if (results && results.length > 0) {
+      await redisClient.cacheData(cacheKey, results);
+      res.status(200).json({
+        itemsFound: results.length,
+        items: results,
+      });
+      return;
+    } else {
+      res.status(404).json({
+        message: "No files found matching the query",
+      });
+      return;
+    }
   } catch (error) {
-    logger.error("An error occurred while searching for files.");
-    res.status(404).json("An error occurred while searching for files.");
+    console.error("Error retrieving files:", error);
+    res.status(500).json({
+      message: "Error retrieving files",
+    });
+    return;
   }
 };
 

@@ -1,10 +1,12 @@
 import { Request, Response } from "express";
 
-import FileMetadata from "../model/fileMetaData";
+import { MongoDBClient } from "../utils/mongooseUtils";
+import { RedisClient } from "../utils/redisClient";
 import logger from "../logger/logger";
-import minioClient from "../minio/minioClient";
-import mongoose from "mongoose";
-import { storeCache } from "../utils/redisClient";
+import { minioClientInstance } from "../utils/minioUtils";
+
+const redisClient = new RedisClient();
+const mongoDBClient = new MongoDBClient();
 
 const fileUpdater = async (req: Request, res: Response): Promise<any> => {
   if (!req.file) {
@@ -15,59 +17,42 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
   const { originalname, buffer, size } = req.file;
   const [filename, ...extensionParts] = originalname.split(".");
   const extension = extensionParts.join(".");
-  const fileSize = size / 1024;
+  const fileSize = size / 1024; // KB
   const bucketName = process.env.MINIO_BUCKET_NAME as string;
 
-  const session = await FileMetadata.startSession();
-  session.startTransaction();
+  const uniqueCacheKey = redisClient.generateUniqueCacheKey({ filename });
 
   try {
-    const fileMetadata = await FileMetadata.findOne({ fileName: filename });
+    const fileMetadata = await mongoDBClient.getFileMetadataFromDB(filename);
     if (!fileMetadata) {
-      await session.abortTransaction();
-      session.endSession(); //
-      logger.error("File metadata not found");
-      return res.status(404).send({ message: "File metadata not found" });
-    }
-
-    try {
-      await minioClient.statObject(
-        bucketName,
-        `${fileMetadata.fileName}.${fileMetadata.fileExtension}`
-      );
-    } catch (err) {
-      await session.abortTransaction();
-      session.endSession(); //
-      logger.error("File not found in MinIO");
-      return res.status(404).send({ message: "File not found in MinIO" });
-    }
-
-    const obj = await minioClient.putObject(bucketName, originalname, buffer);
-    if (!obj || !obj.etag) {
-      await session.abortTransaction();
-      session.endSession(); //
-      logger.error("Failed to upload the file to MinIO");
+      logger.error(`File metadata not found for: ${filename}`);
       return res
-        .status(500)
-        .send({ message: "Failed to upload the file to MinIO" });
+        .status(404)
+        .send({ message: `File ${filename} not found in the database.` });
     }
 
-    fileMetadata.fileName = filename;
-    fileMetadata.fileExtension = extension;
-    fileMetadata.fileSize = fileSize;
-    await fileMetadata.save({ session });
-    await session.commitTransaction();
-    storeCache(filename, JSON.stringify(fileMetadata));
-    session.endSession(); //
+    await minioClientInstance.uploadFileToMinio(
+      bucketName,
+      originalname,
+      buffer
+    );
+
+    await mongoDBClient.updateFileMetadataInDB(filename, extension, fileSize);
+
+    await redisClient.resetCache(uniqueCacheKey, {
+      fileName: filename,
+      fileExtension: extension,
+      fileSize,
+    });
+
     logger.info("File updated successfully");
+
     return res.status(200).send({
       message: "File updated successfully",
-      data: fileMetadata,
+      data: { filename, fileSize, fileExtension: extension },
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession(); //
-    logger.error("Failed to update the file");
+    logger.error("Failed to update the file", error);
     return res.status(500).send({
       message: "Failed to update the file",
       error: error,

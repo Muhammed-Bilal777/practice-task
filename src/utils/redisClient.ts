@@ -1,57 +1,98 @@
+import { IRedisClient } from "./interfaces/IRedisClient";
 import Redis from "ioredis";
-import logger from "../logger/logger";
 
-const redis = new Redis({
-  host: "redis",
-  port: 6379,
+const redisClient = new Redis({
+  host: process.env.REDIS_HOST,
+  port: Number(process.env.REDIS_PORT),
   db: 0,
 });
-redis.on("connect", () => {
-  console.log("Connected to Redis");
-  logger.info("Connected to Redis");
-});
 
-redis.on("error", (err) => {
-  console.error("Error connecting to Redis:", err);
-  logger.error("Error connecting to Redis:");
-});
-
-const storeCache = async (
-  key: string,
-  value: string | Buffer,
-  ttl: number = 3600
-) => {
-  try {
-    await redis.setex(key, ttl, value);
-    console.log(`Cache set for key: ${key}`);
-    logger.info("cache set");
-  } catch (err) {
-    console.error(`Error storing cache for key: ${key}`, err);
-    logger.info("Error storing cache");
+export class RedisClient implements IRedisClient {
+  generateUniqueCacheKey(
+    queryParams: Record<string, string | undefined>
+  ): string {
+    const keys = Object.keys(queryParams)
+      .filter((key) => queryParams[key])
+      .sort();
+    const queryString = keys
+      .map((key) => `${key}:${queryParams[key]}`)
+      .join("|");
+    return `files:cache:${queryString}`;
   }
-};
 
-const getCache = async (key: string): Promise<string | null> => {
-  try {
-    const value = await redis.get(key);
-    logger.info("fetched stored cache");
-    return value;
-  } catch (err) {
-    console.error(`Error getting cache for key: ${key}`, err);
-    logger.error("Error getting cache");
-    return null;
+  // Cache data in Redis
+  async cacheData(key: string, data: any): Promise<void> {
+    try {
+      await redisClient.set(key, JSON.stringify(data), "EX", 3600); // Cache expires in 1 hour
+      console.log(`Cache set for key: ${key}`);
+    } catch (err) {
+      console.error(`Error setting cache for key: ${key}`, err);
+    }
   }
-};
 
-const deleteCache = async (key: string) => {
-  try {
-    await redis.del(key);
-    console.log(`Cache deleted for key: ${key}`);
-    logger.info("deleted cache");
-  } catch (err) {
-    console.error(`Error deleting cache for key: ${key}`, err);
-    logger.error("error while deleting cache");
+  // Get cached data from Redis
+  async getCachedData(key: string): Promise<any | null> {
+    try {
+      const cached = await redisClient.get(key);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+      return null;
+    } catch (err) {
+      console.error(`Error fetching cache for key: ${key}`, err);
+      return null;
+    }
   }
-};
 
-export { storeCache, getCache, deleteCache };
+  // Reset cache (either update or invalidate based on input)
+  async resetCache(key?: string, data?: any): Promise<void> {
+    try {
+      if (key && data) {
+        const cachedData = await redisClient.get("files:cache:");
+        if (cachedData) {
+          const parsedData = JSON.parse(cachedData);
+
+          // Filter out the item to be updated or replaced
+          const filteredCache = parsedData.filter(
+            (item: any) => item.fileName !== key
+          );
+          filteredCache.push(data);
+
+          // Set the updated cache
+          await redisClient.set(
+            "files:cache:",
+            JSON.stringify(filteredCache),
+            "EX",
+            3600
+          );
+          console.log("Cache updated after file upload");
+        } else {
+          // If no cache, set it with the new data
+          await redisClient.set(
+            "files:cache:",
+            JSON.stringify([data]),
+            "EX",
+            3600
+          );
+          console.log("Cache set with new data for all files");
+        }
+      } else {
+        // Invalidate cache for all files
+        await redisClient.del("files:cache:");
+        console.log("Cache invalidated for all files");
+      }
+    } catch (err) {
+      console.error("Error resetting cache:", err);
+    }
+  }
+
+  // Invalidate cache for a specific key
+  async invalidateCache(key: string): Promise<void> {
+    try {
+      await redisClient.del(key);
+      console.log(`Cache invalidated for key: ${key}`);
+    } catch (err) {
+      console.error(`Error invalidating cache for key: ${key}`, err);
+    }
+  }
+}

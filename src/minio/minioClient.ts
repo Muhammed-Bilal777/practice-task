@@ -1,4 +1,5 @@
 import { Client } from "minio";
+import { Request } from "express";
 import dotenv from "dotenv";
 
 dotenv.config({
