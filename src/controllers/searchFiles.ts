@@ -1,76 +1,19 @@
 import { Request, Response } from "express";
-import {
-  cacheData,
-  generateUniqueCacheKey,
-  getCachedData,
-} from "../utils/redisClient";
 
-import FileMetadata from "../model/fileMetaData";
+import { IMongoDBClient } from "../utils/interfaces/IMongoDBClient";
+import { IRedisClient } from "../utils/interfaces/IRedisClient";
+import { MongoDBClient } from "../utils/mongooseUtils";
+import { RedisClient } from "../utils/redisClient";
+import { buildSearchCriteria } from "../utils/seachCreteria";
+
+const mongoDBClient: IMongoDBClient = new MongoDBClient();
+const redisClient: IRedisClient = new RedisClient();
 
 const findFiles = async (req: Request, res: Response): Promise<void> => {
-  const { fileName, fileExtension, fileSize, minSize, maxSize } = req.query;
-
-  const searchCriteria: { $and: Array<{ [key: string]: any }> } = {
-    $and: [],
-  };
-
-  if (fileName) {
-    searchCriteria.$and.push({ fileName });
-  }
-  if (fileExtension) {
-    searchCriteria.$and.push({ fileExtension });
-  }
-  if (fileSize) {
-    searchCriteria.$and.push({ fileSize: Number(fileSize) });
-  }
-  if (minSize) {
-    searchCriteria.$and.push({ fileSize: { $gte: Number(minSize) } });
-  }
-  if (maxSize) {
-    searchCriteria.$and.push({ fileSize: { $lte: Number(maxSize) } });
-  }
-
   const queryStr: any = req.query;
-  const cacheKey = generateUniqueCacheKey(queryStr);
+  const cacheKey = redisClient.generateUniqueCacheKey(queryStr);
 
-  if (Object.keys(req.query).length === 0) {
-    const cachedData = await getCachedData("files:cache:");
-
-    if (cachedData) {
-      res.status(200).json({
-        itemsFound: cachedData.length,
-        items: cachedData,
-      });
-      return;
-    }
-
-    try {
-      const results = await FileMetadata.find();
-
-      if (results.length === 0) {
-        res.status(404).json({
-          message: "No files found in the database",
-        });
-        return;
-      }
-      const uniqueCashKey = "files:cache:";
-      await cacheData(uniqueCashKey, results);
-
-      res.status(200).json({
-        itemsFound: results.length,
-        items: results,
-      });
-      return;
-    } catch (error) {
-      console.error("Error retrieving all files:", error);
-      res.status(500).json({
-        message: "Error retrieving all files",
-      });
-      return;
-    }
-  }
-
-  const cachedData = await getCachedData(cacheKey);
+  const cachedData = await redisClient.getCachedData(cacheKey);
   if (cachedData) {
     res.status(200).json({
       itemsFound: cachedData.length,
@@ -79,23 +22,45 @@ const findFiles = async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  try {
-    const results = await FileMetadata.find(searchCriteria);
+  if (Object.keys(req.query).length === 0) {
+    const allFilesCache = await redisClient.getCachedData("files:cache:");
+    if (allFilesCache) {
+      res.status(200).json({
+        itemsFound: allFilesCache.length,
+        items: allFilesCache,
+      });
+      return;
+    }
 
-    if (results.length === 0) {
+    const results = await mongoDBClient.findAllFilesInDB();
+    if (results) {
+      await redisClient.cacheData(cacheKey, results);
+      res.status(200).json({
+        itemsFound: results.length,
+        items: results,
+      });
+      return;
+    }
+  }
+
+  try {
+    const searchCriteria = buildSearchCriteria(queryStr);
+
+    const results = await mongoDBClient.findFilesInDB(searchCriteria);
+
+    if (results && results.length > 0) {
+      await redisClient.cacheData(cacheKey, results);
+      res.status(200).json({
+        itemsFound: results.length,
+        items: results,
+      });
+      return;
+    } else {
       res.status(404).json({
         message: "No files found matching the query",
       });
       return;
     }
-
-    await cacheData(cacheKey, results);
-
-    res.status(200).json({
-      itemsFound: results.length,
-      items: results,
-    });
-    return;
   } catch (error) {
     console.error("Error retrieving files:", error);
     res.status(500).json({

@@ -1,5 +1,4 @@
-import express, { Router } from "express";
-
+import { Router } from "express";
 import fileDeleter from "../controllers/deleteFile";
 import fileUpdater from "../controllers/updateFile";
 import fileUploader from "../controllers/fileUploader";

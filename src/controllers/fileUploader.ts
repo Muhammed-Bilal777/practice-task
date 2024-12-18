@@ -1,9 +1,14 @@
 import { Request, Response } from "express";
 
-import FileMetadata from "../model/fileMetaData";
-import minioClient from "../minio/minioClient";
+import { IMongoDBClient } from "../utils/interfaces/IMongoDBClient";
+import { IRedisClient } from "../utils/interfaces/IRedisClient";
+import { MongoDBClient } from "../utils/mongooseUtils";
+import { RedisClient } from "../utils/redisClient";
+import { minioClientInstance } from "../utils/minioUtils";
 import mongoose from "mongoose";
-import { resetCache } from "../utils/redisClient";
+
+const mongoDBClient: IMongoDBClient = new MongoDBClient();
+const redisClient: IRedisClient = new RedisClient();
 
 const fileUploader = async (req: any, res: Response): Promise<void> => {
   const file = req.file;
@@ -26,30 +31,42 @@ const fileUploader = async (req: any, res: Response): Promise<void> => {
   session.startTransaction();
 
   try {
-    try {
-      await minioClient.statObject(bucketName, originalname);
+    const fileExists = await minioClientInstance.checkFileExists(
+      bucketName,
+      originalname
+    );
+
+    if (fileExists) {
       res.status(409).send({
         message: "File already exists in the bucket.",
       });
       return;
-    } catch (err) {
-      console.log(err);
     }
 
-    await minioClient.putObject(bucketName, originalname, fileBuffer);
+    await minioClientInstance.uploadFileToMinio(
+      bucketName,
+      originalname,
+      fileBuffer
+    );
 
-    const fileDetails = new FileMetadata({
+    await mongoDBClient.saveFileMetadata(
+      session,
+      filename,
+      extension,
+      fileSize
+    );
+
+    const uniqueCacheKey = redisClient.generateUniqueCacheKey({
+      fileName: filename,
+      fileExtension: extension,
+    });
+    await redisClient.resetCache(uniqueCacheKey, {
       fileName: filename,
       fileExtension: extension,
       fileSize,
     });
 
-    await fileDetails.save({ session });
     await session.commitTransaction();
-
-    //const uniqueKey = generateUniqueKey({ fileName: filename });
-    const uniqueCashKey = "files:cache:";
-    await resetCache(uniqueCashKey, fileDetails);
     res.status(201).send({
       message: "File uploaded successfully",
     });

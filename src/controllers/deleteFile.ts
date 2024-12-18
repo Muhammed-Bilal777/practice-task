@@ -1,15 +1,13 @@
 import { Request, Response } from "express";
-import {
-  cacheData,
-  generateUniqueCacheKey,
-  getCachedData,
-  invalidateCache,
-} from "../utils/redisClient";
 
-import FileMetadata from "../model/fileMetaData";
+import { MongoDBClient } from "../utils/mongooseUtils";
+import { RedisClient } from "../utils/redisClient";
 import logger from "../logger/logger";
-import minioClient from "../minio/minioClient";
+import { minioClientInstance } from "../utils/minioUtils";
 import mongoose from "mongoose";
+
+const redisClient = new RedisClient();
+const mongoDBClient = new MongoDBClient();
 
 const fileDeleter = async (req: Request, res: Response): Promise<any> => {
   const { fileName } = req.query;
@@ -21,14 +19,13 @@ const fileDeleter = async (req: Request, res: Response): Promise<any> => {
     });
   }
 
-  const session = await FileMetadata.startSession();
+  const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const fileMetadata = await FileMetadata.findOne({ fileName }).session(
-      session
+    const fileMetadata = await mongoDBClient.getFileMetadataFromDB(
+      fileName as string
     );
-
     if (!fileMetadata) {
       await session.abortTransaction();
       session.endSession();
@@ -39,13 +36,9 @@ const fileDeleter = async (req: Request, res: Response): Promise<any> => {
     }
 
     const bucketName = process.env.MINIO_BUCKET_NAME as string;
-    try {
-      await minioClient.statObject(
-        bucketName,
-        `${fileMetadata.fileName}.${fileMetadata.fileExtension}`
-      );
 
-      await minioClient.removeObject(
+    try {
+      await minioClientInstance.removeFileFromMinio(
         bucketName,
         `${fileMetadata.fileName}.${fileMetadata.fileExtension}`
       );
@@ -62,45 +55,37 @@ const fileDeleter = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
-    await FileMetadata.deleteOne({ fileName });
+    await mongoDBClient.deleteFileMetadataInDB(fileName as string);
 
-    const uniqueCashKey = "files:cache:";
+    const uniqueCacheKey = "files:cache:";
 
-    const cachedData = await getCachedData(uniqueCashKey);
-
+    const cachedData = await redisClient.getCachedData(uniqueCacheKey);
     if (cachedData) {
       const filteredCache = cachedData.filter(
         (item: any) => item.fileName !== fileName
       );
-      console.log(filteredCache, "filtered data from delete controller");
-
-      await cacheData(uniqueCashKey, filteredCache);
+      await redisClient.cacheData(uniqueCacheKey, filteredCache);
       logger.info("Cache updated after file deletion.");
     } else {
       logger.warn("No cache found for all files, nothing to invalidate.");
     }
 
-    const query: Record<string, string | undefined> = {
+    const fileNameBasedCacheKey = redisClient.generateUniqueCacheKey({
       filename: fileName as string,
-    };
-
-    //deleting cache if its present on FILENAME based
-    const fileNameBasedCacheKey = generateUniqueCacheKey(query);
-
-    const fileNameBasedCacheData = await getCachedData(fileNameBasedCacheKey);
+    });
+    const fileNameBasedCacheData = await redisClient.getCachedData(
+      fileNameBasedCacheKey
+    );
 
     if (fileNameBasedCacheData) {
-      await invalidateCache(fileNameBasedCacheKey);
-      console.log(
-        "file name based cahche has been cleared with key ",
-        fileName
-      );
+      await redisClient.invalidateCache(fileNameBasedCacheKey);
+      logger.info(`File name based cache cleared for: ${fileName}`);
     } else {
-      console.log("no cache found for file name based cache");
+      logger.info("No cache found for file name based cache.");
     }
 
     await session.commitTransaction();
-    //fileMetadata.save({ session });
+    session.endSession();
 
     logger.info(
       "File deleted successfully from both MinIO and database, cache invalidated."
@@ -111,13 +96,11 @@ const fileDeleter = async (req: Request, res: Response): Promise<any> => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    logger.error("Failed to delete the file.");
+    logger.error("Failed to delete the file.", error);
     return res.status(500).send({
       message: "Failed to delete the file.",
       error: error,
     });
-  } finally {
-    session.endSession();
   }
 };
 

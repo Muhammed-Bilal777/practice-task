@@ -1,11 +1,13 @@
-import { Request, Response, query } from "express";
-import {
-  cacheData,
-  generateUniqueCacheKey,
-  getCachedData,
-} from "../utils/redisClient";
+import { Request, Response } from "express";
 
-import FileMetadata from "../model/fileMetaData";
+import { IMongoDBClient } from "../utils/interfaces/IMongoDBClient";
+import { IRedisClient } from "../utils/interfaces/IRedisClient";
+import { MongoDBClient } from "../utils/mongooseUtils";
+import { RedisClient } from "../utils/redisClient";
+import logger from "../logger/logger";
+
+const redisClient: IRedisClient = new RedisClient();
+const mongoDBClient: IMongoDBClient = new MongoDBClient();
 
 const getFileByFilename = async (
   req: Request,
@@ -18,33 +20,31 @@ const getFileByFilename = async (
     return;
   }
 
-  const uniqueCashKey = generateUniqueCacheKey({ filename });
+  const uniqueCacheKey = redisClient.generateUniqueCacheKey({ filename });
 
-  const cachedFileMetadata = await getCachedData(uniqueCashKey);
-
+  const cachedFileMetadata = await redisClient.getCachedData(uniqueCacheKey);
   if (cachedFileMetadata) {
-    console.log(`Cache hit for file: ${filename}`);
+    logger.info(`Cache hit for file: ${filename}`);
     res.status(200).json({ fileMetadata: cachedFileMetadata });
     return;
   }
 
   try {
-    const fileMetadata = await FileMetadata.findOne({ fileName: filename });
+    const fileMetadata = await mongoDBClient.getFileMetadataFromDB(filename);
 
-    if (!fileMetadata) {
-      res
-        .status(404)
-        .send({ message: `File ${filename} not found in the database.` });
+    if (fileMetadata) {
+      await redisClient.cacheData(uniqueCacheKey, fileMetadata);
+      logger.info(`Cache set for file: ${filename}`);
+      res.status(200).json({ fileMetadata });
+      return;
+    } else {
+      res.status(404).send({
+        message: `File ${filename} not found in the database.`,
+      });
       return;
     }
-
-    await cacheData(uniqueCashKey, fileMetadata);
-
-    console.log(`Cache set for file: ${filename}`);
-
-    res.status(200).json({ fileMetadata });
   } catch (error) {
-    console.error(`Error fetching file: ${filename}`, error);
+    logger.error(`Error fetching file: ${filename}`, error);
     res.status(500).send({ message: "Error retrieving file metadata", error });
   }
 };
