@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Test Plan" enabled="true">
+  <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Thread Group" enabled="true">
+    <stringProp name="ThreadGroup.num_threads">1</stringProp>
+    <stringProp name="ThreadGroup.ramp_time">1</stringProp>
+    <stringProp name="ThreadGroup.loops">1</stringProp>
+
+    <!-- POST Request - Upload Image -->
+    <elementProp name="samplers" elementType="HTTPSamplerProxy">
+      <HTTPSamplerProxy guiclass="HTTPSamplerGui" testclass="HTTPSamplerProxy" testname="Upload Image" enabled="true">
+        <stringProp name="HTTPSampler.domain">node-app</stringProp>
+        <stringProp name="HTTPSampler.port">4040</stringProp>
+        <stringProp name="HTTPSampler.protocol">http</stringProp>
+        <stringProp name="HTTPSampler.path">/api/v1/binary</stringProp>
+        <stringProp name="HTTPSampler.method">POST</stringProp>
+        <stringProp name="HTTPSampler.follow_redirects">true</stringProp>
+        <stringProp name="HTTPSampler.auto_redirects">false</stringProp>
+        <stringProp name="HTTPSampler.concurrentDwn">false</stringProp>
+        <stringProp name="HTTPSampler.timeout">30000</stringProp>
+        <boolProp name="HTTPSampler.use_multipart_data">true</boolProp>
+        <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+          <argument name="file" value="node.png" metaData="filename" />
+          <argument name="name" value="Sample Image of node photo" />
+          <argument name="description" value="This is a sample image for uploading." />
+        </elementProp>
+      </HTTPSamplerProxy>
+    </elementProp>
+
+    <!-- GET Request - Fetch Image -->
+    <elementProp name="samplers" elementType="HTTPSamplerProxy">
+      <HTTPSamplerProxy guiclass="HTTPSamplerGui" testclass="HTTPSamplerProxy" testname="Get Image" enabled="true">
+        <stringProp name="HTTPSampler.domain">node-app</stringProp>
+        <stringProp name="HTTPSampler.port">4040</stringProp>
+        <stringProp name="HTTPSampler.protocol">http</stringProp>
+        <stringProp name="HTTPSampler.path">/api/v1/binary/files/node.png</stringProp>
+        <stringProp name="HTTPSampler.method">GET</stringProp>
+        <stringProp name="HTTPSampler.follow_redirects">true</stringProp>
+        <stringProp name="HTTPSampler.auto_redirects">false</stringProp>
+        <stringProp name="HTTPSampler.concurrentDwn">false</stringProp>
+        <stringProp name="HTTPSampler.timeout">30000</stringProp>
+      </HTTPSamplerProxy>
+    </elementProp>
+
+    <!-- PUT Request - Update Image -->
+    <elementProp name="samplers" elementType="HTTPSamplerProxy">
+      <HTTPSamplerProxy guiclass="HTTPSamplerGui" testclass="HTTPSamplerProxy" testname="Update Image" enabled="true">
+        <stringProp name="HTTPSampler.domain">node-app</stringProp>
+        <stringProp name="HTTPSampler.port">4040</stringProp>
+        <stringProp name="HTTPSampler.protocol">http</stringProp>
+        <stringProp name="HTTPSampler.path">/api/v1/binary</stringProp>
+        <stringProp name="HTTPSampler.method">PUT</stringProp>
+        <stringProp name="HTTPSampler.follow_redirects">true</stringProp>
+        <stringProp name="HTTPSampler.auto_redirects">false</stringProp>
+        <stringProp name="HTTPSampler.concurrentDwn">false</stringProp>
+        <stringProp name="HTTPSampler.timeout">30000</stringProp>
+        <boolProp name="HTTPSampler.use_multipart_data">true</boolProp>
+        <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+          <argument name="file" value="node.png" metaData="filename" />
+          <argument name="name" value="Updated Image" />
+          <argument name="description" value="This is an updated image description." />
+        </elementProp>
+      </HTTPSamplerProxy>
+    </elementProp>
+
+    <!-- DELETE Request - Delete Image -->
+    <elementProp name="samplers" elementType="HTTPSamplerProxy">
+      <HTTPSamplerProxy guiclass="HTTPSamplerGui" testclass="HTTPSamplerProxy" testname="Delete Image" enabled="true">
+        <stringProp name="HTTPSampler.domain">node-app</stringProp>
+        <stringProp name="HTTPSampler.port">4040</stringProp>
+        <stringProp name="HTTPSampler.protocol">http</stringProp>
+        <stringProp name="HTTPSampler.path">/api/v1/binary?fileName=node.png</stringProp>
+        <stringProp name="HTTPSampler.method">DELETE</stringProp>
+        <stringProp name="HTTPSampler.follow_redirects">true</stringProp>
+        <stringProp name="HTTPSampler.auto_redirects">false</stringProp>
+        <stringProp name="HTTPSampler.concurrentDwn">false</stringProp>
+        <stringProp name="HTTPSampler.timeout">30000</stringProp>
+      </HTTPSamplerProxy>
+    </elementProp>
+    
+  </ThreadGroup>
+
+  <!-- Result Tree for debugging -->
+  <ResultCollector guiclass="ViewResultsTree" testclass="ResultCollector" testname="View Results Tree" enabled="true">
+    <stringProp name="filename"></stringProp>
+  </ResultCollector>
+</TestPlan>

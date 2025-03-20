@@ -1,0 +1,29 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317" # OTLP receiver listens on this port for traces
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: "node-app"
+          static_configs:
+            - targets: ["node-app:4040"] # Your Prometheus scrape targets
+
+exporters:
+  zipkin:
+    endpoint: "http://zipkin:9411/api/v2/spans" # Zipkin exporter for traces
+  prometheus:
+    endpoint: "0.0.0.0:9090" # The endpoint for Prometheus to scrape metrics
+    namespace: "otel" # Optional: You can specify a namespace for your metrics
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp] # Receives traces from the OTLP receiver
+      exporters: [zipkin] # Sends traces to Zipkin
+    metrics:
+      receivers: [prometheus] # Receives metrics from the Prometheus receiver
+      exporters: [prometheus] # Sends metrics to the Prometheus exporter
+
+# Optional: logging, monitoring, and additional configuration can be included.

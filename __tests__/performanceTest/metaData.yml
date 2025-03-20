@@ -1,0 +1,28 @@
+config:
+  target: "http://node-app:4040"
+  phases:
+    - duration: 1
+      arrivalRate: 1
+
+scenarios:
+  - flow:
+      - post:
+          url: "/api/v1/binary"
+          multipart:
+            file:
+              file: "./node.png"
+            fields:
+              name: "Sample Image of node photo"
+              description: "This is a sample image for uploading."
+      - get:
+          url: "/api/v1/binary/files/node.png"
+      - put:
+          url: "/api/v1/binary"
+          multipart:
+            file:
+              file: "./node.png"
+            fields:
+              name: "Updated Image"
+              description: "This is an updated image description."
+      - delete:
+          url: "/api/v1/binary?fileName=node.png"

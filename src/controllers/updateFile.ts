@@ -1,12 +1,8 @@
 import { Request, Response } from "express";
-
-import { MongoDBClient } from "../utils/mongooseUtils";
-import { RedisClient } from "../utils/redisClient";
 import logger from "../logger/logger";
 import { minioClientInstance } from "../utils/minioUtils";
-
-const redisClient = new RedisClient();
-const mongoDBClient = new MongoDBClient();
+import { mongoClientInstance } from "../utils/mongooseUtils";
+import { redisClientInstance } from "../utils/redisClient";
 
 const fileUpdater = async (req: Request, res: Response): Promise<any> => {
   if (!req.file) {
@@ -20,10 +16,11 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
   const fileSize = size / 1024; // KB
   const bucketName = process.env.MINIO_BUCKET_NAME as string;
 
-  const uniqueCacheKey = redisClient.generateUniqueCacheKey({ filename });
-
   try {
-    const fileMetadata = await mongoDBClient.getFileMetadataFromDB(filename);
+    // Check if the file metadata exists in the database
+    const fileMetadata = await mongoClientInstance.getFileMetadataFromDB(
+      originalname
+    );
     if (!fileMetadata) {
       logger.error(`File metadata not found for: ${filename}`);
       return res
@@ -31,25 +28,42 @@ const fileUpdater = async (req: Request, res: Response): Promise<any> => {
         .send({ message: `File ${filename} not found in the database.` });
     }
 
+    // Upload the updated file to MinIO
     await minioClientInstance.uploadFileToMinio(
       bucketName,
       originalname,
       buffer
     );
 
-    await mongoDBClient.updateFileMetadataInDB(filename, extension, fileSize);
+    // Update the file metadata in MongoDB
+    const updatedData = await mongoClientInstance.updateFileMetadataInDB(
+      originalname,
+      extension,
+      fileSize
+    );
 
-    await redisClient.resetCache(uniqueCacheKey, {
-      fileName: filename,
-      fileExtension: extension,
-      fileSize,
-    });
+    // Update the cache for the specific file
+    await redisClientInstance.setCache(updatedData.fileName, updatedData, 3600); // Cache for 1 hour
+
+    // Update the cache for all files
+    const allFilesCache =
+      (await redisClientInstance.getCache("files:cache:all")) || [];
+
+    // Find the index of the file to update
+    const fileIndex = allFilesCache.findIndex(
+      (file: any) => file.fileName === originalname
+    );
+
+    if (fileIndex !== -1) {
+      // Update the specific file in the cache
+      allFilesCache[fileIndex] = updatedData; // Replace with updated data
+      await redisClientInstance.setCache("files:cache:all", allFilesCache); // Update the cache
+    }
 
     logger.info("File updated successfully");
-
     return res.status(200).send({
       message: "File updated successfully",
-      data: { filename, fileSize, fileExtension: extension },
+      updatedData,
     });
   } catch (error) {
     logger.error("Failed to update the file", error);

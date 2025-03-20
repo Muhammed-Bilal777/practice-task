@@ -1,106 +1,73 @@
 import { Request, Response } from "express";
-
-import { MongoDBClient } from "../utils/mongooseUtils";
-import { RedisClient } from "../utils/redisClient";
-import logger from "../logger/logger";
+import { mongoClientInstance } from "../utils/mongooseUtils";
+import { redisClientInstance } from "../utils/redisClient";
 import { minioClientInstance } from "../utils/minioUtils";
-import mongoose from "mongoose";
+import logger from "../logger/logger";
 
-const redisClient = new RedisClient();
-const mongoDBClient = new MongoDBClient();
+const generateCacheKey = (query: Record<string, any>): string => {
+  const sortedKeys = Object.keys(query).sort();
+  const keyParts = sortedKeys.map((key) => `${key}=${query[key]}`);
 
-const fileDeleter = async (req: Request, res: Response): Promise<any> => {
-  const { fileName } = req.query;
-
-  if (!fileName) {
-    logger.error("File name is required.");
-    return res.status(400).send({
-      message: "File name is required.",
-    });
+  if (query["fileName"]) {
+    keyParts.push(`fileName=${query["fileName"]}`);
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  return `files:cache:query:${keyParts.join("&")}`;
+};
+
+const fileDeleter = async (req: Request, res: Response): Promise<void> => {
+  const { fileName } = req.query;
+  const bucketName = process.env.MINIO_BUCKET_NAME as string;
+
+  if (!fileName) {
+    res.status(400).send({ message: "File name is required." });
+    return;
+  }
+
+  const fileExists = await mongoClientInstance.getFileMetadataFromDB(
+    fileName as string
+  );
+  if (!fileExists) {
+    res.status(404).send({ message: "File not found." });
+    return;
+  }
 
   try {
-    const fileMetadata = await mongoDBClient.getFileMetadataFromDB(
+    await mongoClientInstance.deleteFileMetadataInDB(fileName as string);
+    await minioClientInstance.removeFileFromMinio(
+      bucketName,
       fileName as string
     );
-    if (!fileMetadata) {
-      await session.abortTransaction();
-      session.endSession();
-      logger.error("File not found in the database.");
-      return res.status(404).send({
-        message: "File not found in the database.",
-      });
+
+    const cacheKeyForFile = generateCacheKey({ fileName: fileName as string });
+    await redisClientInstance.deleteCache(cacheKeyForFile);
+
+    const allKeys = await redisClientInstance.keys("files:cache:query:*");
+    for (const key of allKeys) {
+      const cachedData = await redisClientInstance.getCache(key);
+      if (
+        cachedData &&
+        cachedData.some((file: any) => file.fileName === fileName)
+      ) {
+        const updatedCache = cachedData.filter(
+          (file: any) => file.fileName !== fileName
+        );
+        await redisClientInstance.setCache(key, updatedCache);
+      }
     }
 
-    const bucketName = process.env.MINIO_BUCKET_NAME as string;
-
-    try {
-      await minioClientInstance.removeFileFromMinio(
-        bucketName,
-        `${fileMetadata.fileName}.${fileMetadata.fileExtension}`
+    const allFilesCache = await redisClientInstance.getCache("files:cache:all");
+    if (allFilesCache) {
+      const updatedCache = allFilesCache.filter(
+        (file: any) => file.fileName !== fileName
       );
-      logger.info(`File ${fileMetadata.fileName} removed from MinIO.`);
-    } catch (err: any) {
-      logger.error(
-        `MinIO error while removing file ${fileMetadata.fileName}:`,
-        err
-      );
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(500).send({
-        message: `Failed to delete file from MinIO: ${err.message}`,
-      });
+      await redisClientInstance.setCache("files:cache:all", updatedCache);
     }
-
-    await mongoDBClient.deleteFileMetadataInDB(fileName as string);
-
-    const uniqueCacheKey = "files:cache:";
-
-    const cachedData = await redisClient.getCachedData(uniqueCacheKey);
-    if (cachedData) {
-      const filteredCache = cachedData.filter(
-        (item: any) => item.fileName !== fileName
-      );
-      await redisClient.cacheData(uniqueCacheKey, filteredCache);
-      logger.info("Cache updated after file deletion.");
-    } else {
-      logger.warn("No cache found for all files, nothing to invalidate.");
-    }
-
-    const fileNameBasedCacheKey = redisClient.generateUniqueCacheKey({
-      filename: fileName as string,
-    });
-    const fileNameBasedCacheData = await redisClient.getCachedData(
-      fileNameBasedCacheKey
-    );
-
-    if (fileNameBasedCacheData) {
-      await redisClient.invalidateCache(fileNameBasedCacheKey);
-      logger.info(`File name based cache cleared for: ${fileName}`);
-    } else {
-      logger.info("No cache found for file name based cache.");
-    }
-
-    await session.commitTransaction();
-    session.endSession();
-
-    logger.info(
-      "File deleted successfully from both MinIO and database, cache invalidated."
-    );
-    return res.status(200).send({
-      message: "File deleted successfully from both MinIO and database.",
-    });
+    logger.info("File deleted successfully.");
+    res.status(200).send({ message: "File deleted successfully." });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    logger.error("Failed to delete the file.", error);
-    return res.status(500).send({
-      message: "Failed to delete the file.",
-      error: error,
-    });
+    console.error("Failed to delete the file:", error);
+    res.status(500).send({ message: "Failed to delete the file." });
   }
 };
 

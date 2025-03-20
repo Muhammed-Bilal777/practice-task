@@ -3,11 +3,11 @@ import { Request } from "express";
 import dotenv from "dotenv";
 
 dotenv.config({
-  path: "./config/config.env",
+  path: "../../config/config.env",
 });
 
 const minioClient = new Client({
-  endPoint: (process.env.MINIO_END_POINT as string) || "minio",
+  endPoint: process.env.MINIO_END_POINT as string,
   port: Number(process.env.MINIO_PORT),
   useSSL: false,
   accessKey: process.env.MINIO_ACCESS_KEY as string,

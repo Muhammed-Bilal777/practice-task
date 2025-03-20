@@ -1,4 +1,3 @@
-// FileMetadata.js
 import mongoose from "mongoose";
 
 const fileMetadataSchema = new mongoose.Schema({

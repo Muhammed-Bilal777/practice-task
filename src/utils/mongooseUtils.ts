@@ -3,48 +3,25 @@ import { IMongoDBClient } from "./interfaces/IMongoDBClient";
 import mongoose from "mongoose";
 
 export class MongoDBClient implements IMongoDBClient {
-  async buildSearchCriteria(query: any) {
-    const { fileName, fileExtension, fileSize, minSize, maxSize } = query;
-
-    const searchCriteria: { $and: Array<{ [key: string]: any }> } = {
-      $and: [],
-    };
-
-    if (fileName) {
-      searchCriteria.$and.push({ fileName });
-    }
-    if (fileExtension) {
-      searchCriteria.$and.push({ fileExtension });
-    }
-    if (fileSize) {
-      searchCriteria.$and.push({ fileSize: Number(fileSize) });
-    }
-    if (minSize) {
-      searchCriteria.$and.push({ fileSize: { $gte: Number(minSize) } });
-    }
-    if (maxSize) {
-      searchCriteria.$and.push({ fileSize: { $lte: Number(maxSize) } });
-    }
-    return searchCriteria;
-  }
-
   async saveFileMetadata(
     session: mongoose.ClientSession,
-    filename: string,
-    extension: string,
+    fileName: string,
+    fileExtension: string,
     fileSize: number
-  ): Promise<void> {
+  ): Promise<any> {
     try {
       const newFileMetadata = new FileMetadata({
-        fileName: filename,
-        fileExtension: extension,
+        fileName,
+        fileExtension,
         fileSize,
       });
 
-      await newFileMetadata.save({ session });
-      console.log(`File metadata saved for ${filename}`);
+      const fileMetaData = await newFileMetadata.save({ session });
+
+      console.log(`File metadata saved for ${fileName}`);
+      return fileMetaData;
     } catch (error) {
-      console.error(`Error saving file metadata for ${filename}:`, error);
+      console.error(`Error saving file metadata for ${fileName}:`, error);
       throw new Error("Failed to save file metadata.");
     }
   }
@@ -52,7 +29,11 @@ export class MongoDBClient implements IMongoDBClient {
   async getFileMetadataFromDB(filename: string): Promise<any | null> {
     try {
       const fileMetadata = await FileMetadata.findOne({ fileName: filename });
-      return fileMetadata;
+      if (fileMetadata) {
+        return fileMetadata;
+      } else {
+        return null;
+      }
     } catch (error) {
       console.error(`Error fetching file metadata for ${filename}:`, error);
       return null;
@@ -87,9 +68,10 @@ export class MongoDBClient implements IMongoDBClient {
     try {
       const updatedFileMetadata = await FileMetadata.findOneAndUpdate(
         { fileName: filename },
-        { fileExtension: extension, fileSize },
+        { fileName: filename, fileExtension: extension, fileSize },
         { new: true }
       );
+
       return updatedFileMetadata;
     } catch (error) {
       console.error(`Error updating metadata for ${filename}:`, error);
@@ -99,7 +81,7 @@ export class MongoDBClient implements IMongoDBClient {
 
   async deleteFileMetadataInDB(filename: string): Promise<void> {
     try {
-      await FileMetadata.deleteOne({ fileName: filename });
+      await FileMetadata.findOneAndDelete({ fileName: filename });
       console.log(`File metadata for ${filename} deleted successfully.`);
     } catch (error) {
       console.error(`Error deleting metadata for ${filename}:`, error);
@@ -107,3 +89,5 @@ export class MongoDBClient implements IMongoDBClient {
     }
   }
 }
+
+export const mongoClientInstance = new MongoDBClient();

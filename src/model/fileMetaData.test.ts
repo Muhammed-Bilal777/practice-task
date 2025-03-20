@@ -1,4 +1,4 @@
-import FileMetadata from "../../model/fileMetaData";
+import FileMetadata from "./fileMetaData";
 import mongoose from "mongoose";
 
 jest.mock("mongoose", () => ({
@@ -8,7 +8,7 @@ jest.mock("mongoose", () => ({
 
 describe("FileMetadata Model", () => {
   it("should create a model with the correct schema", () => {
-     const mockSchema = {
+    const mockSchema = {
       fileName: { type: String, required: true },
       fileExtension: { type: String, required: true },
       fileSize: { type: Number, required: true },

@@ -1,0 +1,15 @@
+# Dockerfile.artillery
+FROM node:18-slim
+
+# Install Artillery
+RUN apt-get update && apt-get install -y curl && npm install -g artillery
+
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the performance test files
+COPY __tests__/performanceTest /app/__tests__/performanceTest
+
+# Set the command to run Artillery
+CMD ["artillery"]

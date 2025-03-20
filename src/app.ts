@@ -1,16 +1,20 @@
-import express, { Request, Response } from "express";
+import { instrumentationInitializetion } from "./instrumentation/instrumentationTracing";
+//Open Telemetry Initialization
+instrumentationInitializetion();
 
-import connectDB from "./dbConnection/dbConnection";
+import { connectToDatabase } from "./dbConnection/dbConnection";
 import dotenv from "dotenv";
+import express from "express";
 import fileRoutes from "./routes/fileRouters";
 import logger from "./logger/logger";
+import path from "path";
 import { setupMetrics } from "./containers-monitoring/metrics";
 
-const app = express();
+export const app = express();
 const router = express.Router();
 
 dotenv.config({
-  path: "./config/config.env",
+  path: path.join(__dirname, "../config/config.env"),
 });
 
 process.on("uncaughtException", (err) => {
@@ -28,10 +32,8 @@ const port = process.env.EXPRESS_SERVER_PORT;
 //health monitoring
 setupMetrics(app);
 
-//database connection
-connectDB();
+connectToDatabase();
 
-//Routes
 app.use("/api/v1", fileRoutes(router));
 
 app.listen(port, () => {

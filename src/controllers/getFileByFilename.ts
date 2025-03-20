@@ -1,13 +1,8 @@
 import { Request, Response } from "express";
 
-import { IMongoDBClient } from "../utils/interfaces/IMongoDBClient";
-import { IRedisClient } from "../utils/interfaces/IRedisClient";
-import { MongoDBClient } from "../utils/mongooseUtils";
-import { RedisClient } from "../utils/redisClient";
 import logger from "../logger/logger";
-
-const redisClient: IRedisClient = new RedisClient();
-const mongoDBClient: IMongoDBClient = new MongoDBClient();
+import { mongoClientInstance } from "../utils/mongooseUtils";
+import { redisClientInstance } from "../utils/redisClient";
 
 const getFileByFilename = async (
   req: Request,
@@ -20,9 +15,7 @@ const getFileByFilename = async (
     return;
   }
 
-  const uniqueCacheKey = redisClient.generateUniqueCacheKey({ filename });
-
-  const cachedFileMetadata = await redisClient.getCachedData(uniqueCacheKey);
+  const cachedFileMetadata = await redisClientInstance.getCache(filename);
   if (cachedFileMetadata) {
     logger.info(`Cache hit for file: ${filename}`);
     res.status(200).json({ fileMetadata: cachedFileMetadata });
@@ -30,10 +23,12 @@ const getFileByFilename = async (
   }
 
   try {
-    const fileMetadata = await mongoDBClient.getFileMetadataFromDB(filename);
+    const fileMetadata = await mongoClientInstance.getFileMetadataFromDB(
+      filename
+    );
 
     if (fileMetadata) {
-      await redisClient.cacheData(uniqueCacheKey, fileMetadata);
+      await redisClientInstance.setCache(filename, fileMetadata);
       logger.info(`Cache set for file: ${filename}`);
       res.status(200).json({ fileMetadata });
       return;
